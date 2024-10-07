@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>slime</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; background-color: #f0f0f0; }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+				user-select: none;
+        }
+        button {
+            padding: 10px;
+            margin: 5px;
+            font-size: 16px;
+				user-select: none;
+        }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="controls">
+    <button id="toggleDots">Toggle Dots</button>
+    <button id="toggleSprings">Toggle Springs</button>
+	 <button id="toggleCetral">toggle central</button>
+    <br>
+    <button id="left">Left</button>
+    <button id="up">Up</button>
+    <button id="down">Down</button>
+    <button id="right">Right</button>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const particles = [];
+const springs = [];
+const radius = 60;
+const particleDistance = 10;
+const gravity = 0.25;
+const centerGravity = 0.05;
+const stiffness = 0.6;
+const damping = 0.9;
+const friction = 0.8;
+const bounceFactor = 0.8;
+const repulsionStrength = 0.35;
+const centerSpringStiffness = 0.0004;
+
+let centerParticle;
+let showDots = false;
+let showSprings = false;
+let showCentral = false;
+
+// Force variables
+const leftForceMagnitude = 1.5;
+const upForceMagnitude = 1;
+const downForceMagnitude = 1;
+const rightForceMagnitude = 1.5;
+let forceInterval;
+
+// Define the ground height
+const groundHeight = canvas.height - 50;
+const upButtonThreshold = 10;
+
+// Particle class
+class Particle {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.oldX = x;
+        this.oldY = y;
+    }
+
+    applyForces(particleGravity) {
+        const vx = (this.x - this.oldX) * friction;
+        const vy = (this.y - this.oldY) * friction;
+        this.oldX = this.x;
+        this.oldY = this.y;
+        this.x += vx;
+        this.y += vy + particleGravity;
+
+        if (this.y > groundHeight) {
+            this.y = groundHeight;
+            this.oldY = this.y - vy * bounceFactor;
+        }
+
+        if (this.x < 0) {
+            this.x = 0;
+            this.oldX = this.x + vx * bounceFactor;
+        } else if (this.x > canvas.width) {
+            this.x = canvas.width;
+            this.oldX = this.x - vx * bounceFactor;
+        }
+    }
+
+    applyRepulsion(particles) {
+        for (const other of particles) {
+            if (other !== this) {
+                const dx = this.x - other.x;
+                const dy = this.y - other.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance < 15) {
+                    const force = repulsionStrength * (15 - distance);
+                    this.x += (dx / distance) * force;
+                    this.y += (dy / distance) * force;
+                }
+            }
+        }
+    }
+
+    applyForce(dx, dy) {
+        this.x += dx;
+        this.y += dy;
+    }
+}
+
+// Spring class
+class Spring {
+    constructor(p1, p2, length, stiffness) {
+        this.p1 = p1;
+        this.p2 = p2;
+        this.length = length;
+        this.stiffness = stiffness;
+    }
+
+    update() {
+        const dx = this.p1.x - this.p2.x;
+        const dy = this.p1.y - this.p2.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const force = (distance - this.length) * this.stiffness;
+        const fx = (dx / distance) * force;
+        const fy = (dy / distance) * force;
+        this.p1.x -= fx * damping;
+        this.p1.y -= fy * damping;
+        this.p2.x += fx * damping;
+        this.p2.y += fy * damping;
+    }
+}
+
+// Create jelly particles
+function createJelly(centerX, centerY, radius, particleDistance) {
+    centerParticle = new Particle(centerX, centerY);
+    particles.push(centerParticle);
+
+    for (let r = 0; r <= radius; r += particleDistance) {
+        const particlesInLayer = Math.floor((2 * Math.PI * r) / particleDistance);
+        const angleIncrement = (2 * Math.PI) / particlesInLayer;
+
+        for (let i = 0; i < particlesInLayer; i++) {
+            const angle = i * angleIncrement;
+            const px = centerX + Math.cos(angle) * r;
+            const py = centerY + Math.sin(angle) * r;
+            const newParticle = new Particle(px, py);
+            particles.push(newParticle);
+            springs.push(new Spring(centerParticle, newParticle, radius, centerSpringStiffness));
+        }
+    }
+
+    for (let i = 1; i < particles.length; i++) {
+        const current = i;
+        const next = (i + 1) % particles.length;
+        springs.push(new Spring(particles[current], particles[next], 15, stiffness));
+    }
+}
+
+// Update physics
+function update() {
+    for (const particle of particles) {
+        if (particle === centerParticle) {
+            particle.applyForces(centerGravity);
+        } else {
+            particle.applyForces(gravity);
+        }
+    }
+
+    for (const particle of particles) {
+        particle.applyRepulsion(particles);
+    }
+
+    for (const spring of springs) {
+        spring.update();
+    }
+}
+
+// Render particles
+function render() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'green';
+    ctx.fillRect(0, groundHeight, canvas.width, 50);
+
+    // Draw connecting lines and fill the shape
+    ctx.beginPath();
+    for (let i = 0; i < particles.length; i++) {
+        ctx.lineTo(particles[i].x, particles[i].y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(128, 128, 128, 0.7)';
+    ctx.fill();
+
+    // Draw lines connecting every particle
+    ctx.strokeStyle = 'rgba(60, 60, 60, 1)'; // Line color
+    ctx.lineWidth = 1;
+    for (let i = 0; i < particles.length; i++) {
+        for (let j = 0; j < particles.length; j++) {
+            if (i !== j) { // Connect each particle to every other particle
+                ctx.beginPath();
+                ctx.moveTo(particles[i].x, particles[i].y);
+                ctx.lineTo(particles[j].x, particles[j].y);
+                ctx.stroke();
+            }
+        }
+    }
+
+    // Draw particles
+    if (showDots) {
+        for (const particle of particles) {
+            ctx.fillStyle = '#000000';
+            ctx.beginPath();
+            ctx.arc(particle.x, particle.y, 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    if (showSprings) {
+        for (const spring of springs) {
+            ctx.strokeStyle = 'blue';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(spring.p1.x, spring.p1.y);
+            ctx.lineTo(spring.p2.x, spring.p2.y);
+            ctx.stroke();
+        }
+    }
+
+    ctx.fillStyle = 'transparent';  // Make the center dot fisne suyu rengi
+    ctx.beginPath();
+    ctx.arc(centerParticle.x, centerParticle.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+// Simulate physics and rendering
+function simulate() {
+    update();
+    render();
+    requestAnimationFrame(simulate);
+}
+
+// Button functionality for toggling dots and springs
+document.getElementById('toggleDots').addEventListener('click', function() {
+    showDots = !showDots;
+});
+
+document.getElementById('toggleSprings').addEventListener('click', function() {
+    showSprings = !showSprings;
+});
+
+// Press-and-hold functionality for applying forces
+function startApplyingForce(dx, dy) {
+    clearInterval(forceInterval);
+    forceInterval = setInterval(() => {
+        for (const particle of particles) {
+            particle.applyForce(dx, dy);
+        }
+    }, 100);
+}
+
+function stopApplyingForce() {
+    clearInterval(forceInterval);
+}
+
+// Left button events
+document.getElementById('left').addEventListener('mousedown', () => startApplyingForce(-leftForceMagnitude, 0));
+document.getElementById('left').
+
+addEventListener('touchstart', () =>
+startApplyingForce(-leftForceMagnitude, 0));
+
+document.getElementById('left').addEventListener('mouseup', stopApplyingForce);
+document.getElementById('left').addEventListener('touchend', stopApplyingForce);
+
+// Up button events
+document.getElementById('up').addEventListener('mousedown', () => startApplyingForce(0, -upForceMagnitude));
+document.getElementById('up').addEventListener('touchstart', () => startApplyingForce(0, -upForceMagnitude));
+document.getElementById('up').addEventListener('mouseup', stopApplyingForce);
+document.getElementById('up').addEventListener('touchend', stopApplyingForce);
+
+// Down button events
+document.getElementById('down').addEventListener('mousedown', () => startApplyingForce(0, downForceMagnitude));
+document.getElementById('down').addEventListener('touchstart', () => startApplyingForce(0, downForceMagnitude));
+document.getElementById('down').addEventListener('mouseup', stopApplyingForce);
+document.getElementById('down').addEventListener('touchend', stopApplyingForce);
+
+// Right button events
+document.getElementById('right').addEventListener('mousedown', () => startApplyingForce(rightForceMagnitude, 0));
+document.getElementById('right').addEventListener('touchstart', () => startApplyingForce(rightForceMagnitude, 0));
+document.getElementById('right').addEventListener('mouseup', stopApplyingForce);
+document.getElementById('right').addEventListener('touchend', stopApplyingForce);
+
+// Initialize the jelly particles
+createJelly(canvas.width / 2, canvas.height / 2, radius, particleDistance);
+simulate();
+</script>
+</body>
+</html>
